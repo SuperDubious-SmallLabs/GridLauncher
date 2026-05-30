@@ -4,6 +4,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build gridlauncher.3dsx
@@ -12,6 +15,8 @@ jobs:
     name: Publish release asset
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       VERSTRING: ${{ needs.build.outputs.VERSTRING }}
     steps:
