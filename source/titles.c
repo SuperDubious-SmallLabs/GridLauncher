@@ -255,20 +255,28 @@ void getIgnoredTitleIDs() {
         int maxTextSize = 20 * maxIgnoreTitleIDs;
         char ignoreText[maxTextSize];
 
-        char ignoredPath[256];
-        snprintf(ignoredPath, sizeof(ignoredPath), "sdmc:%s", ignoredTitlesPath);
-        FILE *fp = fopen(ignoredPath, "r");
+        FS_Path fsPath = fsMakePath(PATH_ASCII, ignoredTitlesPath);
+        Handle fileHandle;
+        Result ret = FSUSER_OpenFile(&fileHandle, sdmcArchive, fsPath, FS_OPEN_READ, 0);
+        if (R_FAILED(ret)) return;
 
-        if (fp != NULL) {
-            fgets(ignoreText, maxTextSize, fp);
-            char * split;
-            split = strtok(ignoreText, ",");
-            while (split != NULL) {
-                strcpy(ignoreTitleIDs[numIgnoreTitleIDs], split);
-                numIgnoreTitleIDs++;
-                split = strtok(NULL, ",");
-            }
-            fclose(fp);
+        u64 fileSize = 0;
+        FSFILE_GetSize(fileHandle, &fileSize);
+        u32 toRead = (u32)fileSize;
+        if (toRead >= (u32)maxTextSize) toRead = maxTextSize - 1;
+
+        u32 bytesRead = 0;
+        ret = FSFILE_Read(fileHandle, &bytesRead, 0, ignoreText, toRead);
+        FSFILE_Close(fileHandle);
+        if (R_FAILED(ret)) return;
+
+        ignoreText[bytesRead] = '\0';
+
+        char * split = strtok(ignoreText, ",");
+        while (split != NULL && numIgnoreTitleIDs < maxIgnoreTitleIDs) {
+            strcpy(ignoreTitleIDs[numIgnoreTitleIDs], split);
+            numIgnoreTitleIDs++;
+            split = strtok(NULL, ",");
         }
     }
 }
@@ -310,11 +318,21 @@ void saveIgnoredTitleIDs() {
         me = me->next;
     }
 
-    FILE* fSave = fopen(ignoredTitlesPath, "w");
-    if (fSave != NULL) {
-        fputs(ignored, fSave);
-        fclose(fSave);
+    u32 ignoredLen = (u32)strlen(ignored);
+    FS_Path fsPath = fsMakePath(PATH_ASCII, ignoredTitlesPath);
+
+    FSUSER_DeleteFile(sdmcArchive, fsPath);
+    Result ret = FSUSER_CreateFile(sdmcArchive, fsPath, 0, ignoredLen);
+    if (R_SUCCEEDED(ret)) {
+        Handle fileHandle;
+        ret = FSUSER_OpenFile(&fileHandle, sdmcArchive, fsPath, FS_OPEN_WRITE, 0);
+        if (R_SUCCEEDED(ret)) {
+            u32 bytesWritten = 0;
+            FSFILE_Write(fileHandle, &bytesWritten, 0, ignored, ignoredLen, FS_WRITE_FLUSH);
+            FSFILE_Close(fileHandle);
+        }
     }
+
     free(ignored);
 
     ignoreTitleIDsLoaded = false;

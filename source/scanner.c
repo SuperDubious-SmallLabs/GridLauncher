@@ -3,6 +3,7 @@
 #include <string.h>
 #include "scanner.h"
 #include "menu.h"
+#include "filesystem.h"
 
 #define _3DSX_MAGIC 0x58534433 // '3DSX'
 
@@ -44,13 +45,26 @@ Result scan3dsx(char* path, char** patterns, int num_patterns, u32* sectionSizes
 {
 	if(!path)return -1;
 
-	FILE* f = fopen(path, "rb");
-	if(!f)return -2;
+	const char* cleanPath = path;
+	if(strncmp(path, "sdmc:", 5) == 0) cleanPath = path + 5;
+
+	FS_Path fsPath = fsMakePath(PATH_ASCII, cleanPath);
+	Handle fileHandle;
+	if(R_FAILED(FSUSER_OpenFile(&fileHandle, sdmcArchive, fsPath, FS_OPEN_READ, 0)))
+		return -2;
 
 	Result ret = 0;
+	u64 readPos = 0;
+	u32 bytesRead = 0;
 
 	_3DSX_Header hdr;
-	fread(&hdr, sizeof(_3DSX_Header), 1, f);
+	Result rdRet = FSFILE_Read(fileHandle, &bytesRead, readPos, &hdr, sizeof(_3DSX_Header));
+	if(R_FAILED(rdRet) || bytesRead != sizeof(_3DSX_Header))
+	{
+		ret = -2;
+		goto end;
+	}
+	readPos += sizeof(_3DSX_Header);
 
 	if(hdr.magic != _3DSX_MAGIC)
 	{
@@ -75,14 +89,16 @@ Result scan3dsx(char* path, char** patterns, int num_patterns, u32* sectionSizes
 		int j;
 		for(j=0; j<num_patterns; j++)patternsFound[j] = false;
 
-		// only scan rodata
-		fseek(f, hdr.codeSegSize, SEEK_CUR);
+		readPos += hdr.codeSegSize;
 
 		int elements;
 		int total_scanned = 0;
 		do
 		{
-			elements = fread(&buffer[max_pattern_size], 1, buffer_size, f);
+			u32 chunkRead = 0;
+			FSFILE_Read(fileHandle, &chunkRead, readPos, &buffer[max_pattern_size], buffer_size);
+			elements = (int)chunkRead;
+			readPos += chunkRead;
 
 			int i, j;
 			int patternsCount[num_patterns];
@@ -118,7 +134,7 @@ Result scan3dsx(char* path, char** patterns, int num_patterns, u32* sectionSizes
 	}
 
 	end:
-	fclose(f);
+	FSFILE_Close(fileHandle);
 	return ret;
 }
 
