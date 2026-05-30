@@ -1,0 +1,85 @@
+#ifndef TITLES_H
+#define TITLES_H
+
+#include <3ds.h>
+
+#include "smdh.h"
+#include "menu.h"
+
+typedef struct
+{
+	u8 mediatype;
+	u64 title_id;
+	smdh_s* icon;
+}titleInfo_s;
+
+typedef bool (*titleFilter_callback)(u64 tid);
+
+typedef struct
+{
+	u8 mediatype;
+	u32 num;
+	titleInfo_s* titles;
+	titleFilter_callback filter;
+}titleList_s;
+
+typedef struct
+{
+	titleList_s lists[3];
+	u32 total;
+	u64 nextCheck;
+	int selectedId;
+	titleInfo_s* selected;
+	menuEntry_s selectedEntry;
+}titleBrowser_s;
+
+extern menu_s titleMenu;
+extern titleBrowser_s titleBrowser;
+extern bool titlemenuIsUpdating;
+extern bool titleMenuInitialLoadDone;
+extern bool preloadTitles;
+extern bool titleThreadNeedsRelease;
+extern bool titleLoadCancelled;
+
+void titlesInit();
+void titlesExit();
+
+void initTitleInfo(titleInfo_s* ti, u8 mediatype, u64 title_id);
+void freeTitleInfo(titleInfo_s* ti);
+
+void initTitleList(titleList_s* tl, titleFilter_callback filter, u8 mediatype);
+void freeTitleList(titleList_s* tl);
+int populateTitleList(titleList_s* tl);
+
+void initTitleBrowser(titleBrowser_s* tb, titleFilter_callback filter);
+//void updateTitleBrowser(titleBrowser_s* tb);
+//void drawTitleBrowser(titleBrowser_s* tb);
+titleInfo_s* findTitleBrowser(titleBrowser_s* tb, u8 mediatype, u64 tid);
+
+void populateTitleMenu(menu_s* titleMenu, titleBrowser_s *tb, bool filter, bool forceHideRegionFree, bool setFilterTicks);
+//void drawTitleMenu(menuEntry_s* titleMenu);
+
+//titleInfo_s* getTitleWithID(titleBrowser_s* tb, u64 tid);
+
+void refreshTitleBrowser(titleBrowser_s* tb);
+
+void updateTitleMenu(titleBrowser_s * aTitleBrowser, menu_s * aTitleMenu, char * titleText, bool filter, bool forceHideRegionFree, bool setFilterTicks);
+void addTitleBannerImagePathToMenuEntry(menuEntry_s *me, u64 title_id);
+
+//void updateFilterTicks(menu_s * aTitleMenu);
+
+void toggleTitleFilter(menuEntry_s *me, menu_s * m);
+
+void saveIgnoredTitleIDs();
+
+void releaseTitleThread();
+
+extern bool titleLoadPaused;
+
+void resumeTitleLoading();
+void pauseTitleLoading();
+void cancelTitleLoading();
+
+void createTitleInfoFromTitleID(u64 title_id, u8 mediaType, titleInfo_s *info);
+
+#endif

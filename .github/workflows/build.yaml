@@ -1,0 +1,42 @@
+name: Build GridLauncher
+
+on:
+  push: # Note: will run on tags push too
+  pull_request:
+  workflow_dispatch: # manual run
+  workflow_call:
+    outputs:
+      VERSTRING:
+        description: Version string
+        value: ${{ jobs.build.outputs.VERSTRING }}
+
+jobs:
+  build:
+    name: Build gridlauncher.3dsx
+    runs-on: ubuntu-latest
+    outputs:
+      VERSTRING: ${{ steps.verstring.outputs.VERSTRING }}
+    container:
+      image: devkitpro/devkitarm
+      options: --user 1001 # runner user, for git safedir
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive # we currently don't use submodules, but just in case...
+        fetch-depth: 0 # deep clone (for git describe)
+        fetch-tags: true
+    - name: Set version string
+      id: verstring
+      run: |
+        VERSTRING=$(git describe --tags --match "v*" --abbrev=7 2>/dev/null | sed 's/-[0-9]*-g/-/' || true)
+        if [ -z "$VERSTRING" ]; then VERSTRING=dev; fi
+        echo "VERSTRING=$VERSTRING" | tee -a $GITHUB_OUTPUT
+    - name: Build
+      run: make -j$(nproc --all)
+    - name: Publish GridLauncher (only on manual run or release)
+      if: github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+      uses: actions/upload-artifact@v4
+      with:
+        name: 3ds-gridlauncher-${{ steps.verstring.outputs.VERSTRING }}
+        path: gridlauncher.3dsx
