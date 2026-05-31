@@ -803,9 +803,9 @@ static void processMainLoop(void)
             showRebootMenu = true;
         }
 
-        // if (hidKeysDown() & KEY_Y) {
-        //     enterNetloader();
-        // }
+        if (hidKeysDown() & KEY_Y) {
+            enterNetloader();
+        }
         
         if (menuStatus == menuStatusHomeMenuApps) {
             if (updateGrid(&titleMenu)) {

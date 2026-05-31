@@ -110,15 +110,12 @@ static int recvall(int sock, void *buffer, int size, int flags) {
 }
 
 
-//---------------------------------------------------------------------------------
-static int receiveDecompress(int sock, FILE *fh, size_t filesize) {
-//---------------------------------------------------------------------------------
+static int receiveDecompress(int sock, Handle fileHandle, u64* writeOffset, size_t filesize) {
 	int ret;
 	unsigned have;
 	z_stream strm;
 	size_t chunksize;
 
-	/* allocate inflate state */
 	strm.zalloc = Z_NULL;
 	strm.zfree = Z_NULL;
 	strm.opaque = Z_NULL;
@@ -131,7 +128,6 @@ static int receiveDecompress(int sock, FILE *fh, size_t filesize) {
 	}
 
 	size_t total = 0;
-	/* decompress until deflate stream ends or end of file */
 	do {
 
 		int len = recvall(sock, &chunksize, 4, 0);
@@ -152,7 +148,6 @@ static int receiveDecompress(int sock, FILE *fh, size_t filesize) {
 
 	strm.next_in = in;
 
-	/* run inflate() on input until output buffer not full */
 	do {
 		strm.avail_out = ZLIB_CHUNK;
 		strm.next_out = out;
@@ -161,7 +156,7 @@ static int receiveDecompress(int sock, FILE *fh, size_t filesize) {
 		switch (ret) {
 
 			case Z_NEED_DICT:
-			ret = Z_DATA_ERROR;	 /* and fall through */
+			ret = Z_DATA_ERROR;
 
 			case Z_DATA_ERROR:
 			case Z_MEM_ERROR:
@@ -173,21 +168,22 @@ static int receiveDecompress(int sock, FILE *fh, size_t filesize) {
 
 		have = ZLIB_CHUNK - strm.avail_out;
 
-		if (fwrite(out, 1, have, fh) != have || ferror(fh)) {
+		u32 bytesWritten = 0;
+		Result wRet = FSFILE_Write(fileHandle, &bytesWritten, *writeOffset, out, have, 0);
+		if (R_FAILED(wRet) || bytesWritten != have) {
 			(void)inflateEnd(&strm);
-			netloader_socket_error("file write error",0);
+			netloader_socket_error("FSFILE_Write failed", (int)wRet);
 			return Z_ERRNO;
 		}
+		*writeOffset += have;
 
 		total += have;
 		sprintf(progress,"%zu (%d%%)",total, (100 * total) / filesize);
 		netloader_draw_progress();
 	} while (strm.avail_out == 0);
 
-	/* done when inflate() says it's done */
 	} while (ret != Z_STREAM_END);
 
-	/* clean up and return */
 	(void)inflateEnd(&strm);
 	return ret == Z_STREAM_END ? Z_OK : Z_DATA_ERROR;
 }
@@ -339,53 +335,47 @@ int load3DSX(int sock, u32 remote) {
 
 	int response = 0;
 
-	chdir("sdmc:/3ds/");
+	static char fullPath[320];
+	snprintf(fullPath, sizeof(fullPath), "/3ds/%s", filename);
 
-	int fd = open(filename,O_CREAT|O_WRONLY,ACCESSPERMS);
+	FS_Path fsPath = fsMakePath(PATH_ASCII, fullPath);
 
-	if (fd < 0) {
+	FSUSER_DeleteFile(sdmcArchive, fsPath);
+	Result ret = FSUSER_CreateFile(sdmcArchive, fsPath, 0, filelen);
+	if (R_FAILED(ret)) {
 		response = -1;
-	} else {
-		if (ftruncate(fd,filelen) == -1) {
-			response = -2;
-			netloader_socket_error("ftruncate",errno);
+	}
+
+	Handle fileHandle = 0;
+	if (response == 0) {
+		ret = FSUSER_OpenFile(&fileHandle, sdmcArchive, fsPath, FS_OPEN_WRITE, 0);
+		if (R_FAILED(ret)) {
+			response = -1;
 		}
 	}
 
-	send(sock,(int *)&response,sizeof(response),0);
-	close(fd);
+	send(sock, (int*)&response, sizeof(response), 0);
 
-	netloadedPath=getcwd(NULL,0);
-	strcat(netloadedPath,filename);
+	netloadedPath = fullPath;
 
-	FILE *file = fopen(filename,"wb");
-	char *writebuffer=malloc(65536);
-	setvbuf(file,writebuffer,_IOFBF, 65536);
+	u64 writeOffset = 0;
 
 	if (response == 0) {
-
-		if (receiveDecompress(sock,file,filelen)==Z_OK) {
-			send(sock,(int *)&response,sizeof(response),0);
-			len = recvall(sock,(char*)&netloaded_cmdlen,4,0);
+		if (receiveDecompress(sock, fileHandle, &writeOffset, filelen) == Z_OK) {
+			FSFILE_SetSize(fileHandle, writeOffset);
+			send(sock, (int*)&response, sizeof(response), 0);
+			len = recvall(sock, (char*)&netloaded_cmdlen, 4, 0);
 			if (netloaded_cmdlen) {
 				netloaded_commandline = malloc(netloaded_cmdlen);
-				len = recvall(sock, netloaded_commandline, netloaded_cmdlen,0);
+				len = recvall(sock, netloaded_commandline, netloaded_cmdlen, 0);
 			}
 		} else {
 			response = 1;
 		}
 	}
 
-	free(netloadedPath);
-	free(writebuffer);
-	ftruncate(fileno(file), ftell(file)); 
-	fclose(file);
+	if (fileHandle) FSFILE_Close(fileHandle);
 
-	if (response == 0) {
-		netloadedPath=getcwd(NULL,0);
-		strcat(netloadedPath,filename);
-		netloadedPath = strchr(netloadedPath,'/');
-	}
 	return response;
 }
 

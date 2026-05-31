@@ -271,6 +271,7 @@ void gfxFillRectAlphaBlend(gfxScreen_t screen, gfx3dSide_t side, u8 r, u8 g, u8 
 	}
 }
 
+
 void gfxFillColor(gfxScreen_t screen, gfx3dSide_t side, u8 rgbColor[3])
 {
 	u16 fbWidth, fbHeight;
