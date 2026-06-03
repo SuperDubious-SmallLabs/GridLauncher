@@ -111,7 +111,7 @@ void drawStatusBar(bool wifiStatus, bool charging, int batteryLevel)
     rgbColour *light = lightTextColour();
 
     int textWidth = MATextWidthInPixels(datestring, &MAFontRobotoRegular10);
-    MADrawText(GFX_TOP, GFX_LEFT, 240-20, (400/2) - (textWidth/2), datestring, &MAFontRobotoRegular10, light->r, light->g, light->b);
+    MADrawText(GFX_TOP, GFX_LEFT, 240-21, (400/2) - (textWidth/2), datestring, &MAFontRobotoRegular10, light->r, light->g, light->b);
 
 	if(wifiStatus)
 	{

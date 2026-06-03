@@ -6,6 +6,7 @@
 #include <malloc.h>
 
 #include "gfx.h"
+#include "c2dbackend.h"
 #include "menu.h"
 #include "background.h"
 #include "statusbar.h"
@@ -155,6 +156,7 @@ void exitServices() {
     netloader_exit();
     titlesExit();
     hidExit();
+    c2dBackendExit();
     gfxExit();
     closeSDArchive();
     fsExit();
@@ -162,14 +164,26 @@ void exitServices() {
     srvExit();
 }
 
+static void fadeOutToBlack(void);
+
 void launchTitleFromMenu(menu_s* m) {
     menuEntry_s* me = getMenuEntry(m, m->selectedEntry);
 
     if (me) {
         if (me->title_id && me->title_id > 0) {
             createTitleInfoFromTitleID(me->title_id, me->mediatype, &target_title);
+            fadeOutToBlack();
             audio_stop();
-            regionFreeRun2(me->title_id, me->mediatype);
+            csndExit();
+            Result res;
+            if (isDSiWareTitle(me->title_id)) {
+                res = NS_RebootToTitle(me->mediatype, me->title_id, 0);
+            } else {
+                res = regionFreeRun2(me->title_id, me->mediatype);
+            }
+            if (R_SUCCEEDED(res)) {
+                while (1) svcSleepThread(1000000000ULL);
+            }
         }
         else {
             die = true;
@@ -185,6 +199,68 @@ void putTitleMenu(char * barTitle) {
 #include "progresswheel.h"
 
 void handleMenuSelection();
+void renderFrame(void);
+
+#define FADE_STEP 20
+#define LOADING_FADE_STEP 25
+
+static void drawFullscreenBlack(u8 alpha)
+{
+    if (alpha == 0) return;
+    c2dFillRect(GFX_TOP,    0, 0, 0, alpha, 0, 0, 240, 400);
+    c2dFillRect(GFX_BOTTOM, 0, 0, 0, alpha, 0, 0, 240, 320);
+}
+
+static void fadeOutToBlack(void)
+{
+    for (int a = FADE_STEP; a < 255; a += FADE_STEP) {
+        renderFrame();
+        drawFullscreenBlack((u8)a);
+        gfxFlip();
+        gspWaitForVBlank();
+    }
+    for (int i = 0; i < 3; i++) {
+        drawFullscreenBlack(255);
+        gfxFlip();
+        gspWaitForVBlank();
+    }
+}
+
+static int bootFadeAlpha = 255;
+static int frameMs = 1000 / 60;
+
+int loadingDiskFade = 0;
+char loadingProgressText[32] = "";
+static u64 loadingLastMs = 0;
+static u64 loadingAccumMs = 0;
+static bool loadingScreenActive = false;
+
+static void drawTopLogo(void)
+{
+    u8 * logoImage = NULL;
+    int logoWidth = 0;
+    int logoHeight = 0;
+
+    if (logoType == logoTypeDefault) {
+        logoImage = (u8*)logodefault_bin;
+        logoWidth = 54;
+        logoHeight = 161;
+    }
+    else if (logoType == logoTypeCompact) {
+        logoImage = (u8*)logocompact_bin;
+        logoWidth = 35;
+        logoHeight = 203;
+    }
+    else if (logoType == logoTypeClassic) {
+        logoImage = (u8*)logoclassic_bin;
+        logoWidth = 25;
+        logoHeight = 223;
+    }
+
+    if (logoImage) {
+        gfxDrawSpriteAlphaBlend(GFX_TOP, GFX_LEFT, logoImage, logoWidth, logoHeight, 0, 400-logoHeight);
+    }
+}
 
 void renderFrame()
 {
@@ -287,7 +363,7 @@ void renderFrame()
             drawAlert("NetLoader", "The NetLoader is currently unavailable. :( This might be normal and fixable. Try and enable it ?\n\nA : Yes\nB : No\n", NULL, 0, NULL);
         }else if(hbmenu_state == HBMENU_TITLESELECT){
 
-            if (updateGrid(&titleMenu)) {
+            if (!loadingScreenActive && updateGrid(&titleMenu)) {
                 launchSVDTFromTitleMenu();
             }
             else {
@@ -379,31 +455,57 @@ void renderFrame()
 
     drawBackground();
 
-    u8 * logoImage = NULL;
-    int logoWidth = 0;
-    int logoHeight = 0;
-
-    if (logoType == logoTypeDefault) {
-        logoImage = (u8*)logodefault_bin;
-        logoWidth = 54;
-        logoHeight = 161;
-    }
-    else if (logoType == logoTypeCompact) {
-        logoImage = (u8*)logocompact_bin;
-        logoWidth = 35;
-        logoHeight = 203;
-    }
-    else if (logoType == logoTypeClassic) {
-        logoImage = (u8*)logoclassic_bin;
-        logoWidth = 25;
-        logoHeight = 223;
-    }
-
-    if (logoImage) {
-        gfxDrawSpriteAlphaBlend(GFX_TOP, GFX_LEFT, logoImage, logoWidth, logoHeight, 0, 400-logoHeight);
-    }
+    drawTopLogo();
 
     drawStatusBar(wifiStatus, charging, batteryLevel);
+}
+
+void renderLoadingFrame(const char* text, u8 diskFade)
+{
+    u64 now = osGetTime();
+    if (loadingLastMs == 0) loadingLastMs = now;
+    loadingAccumMs += (now - loadingLastMs);
+    loadingLastMs = now;
+
+    int steps = 0;
+    while (loadingAccumMs >= (u64)frameMs && steps < 4) {
+        updateBackground();
+        loadingAccumMs -= (u64)frameMs;
+        steps++;
+    }
+
+    strncpy(loadingProgressText, text ? text : "", sizeof(loadingProgressText) - 1);
+    loadingProgressText[sizeof(loadingProgressText) - 1] = '\0';
+
+    loadingScreenActive = true;
+    renderFrame();
+    loadingScreenActive = false;
+
+    drawDiskFade(loadingProgressText, diskFade);
+
+    if (bootFadeAlpha > 0) {
+        drawFullscreenBlack((u8)bootFadeAlpha);
+        bootFadeAlpha -= FADE_STEP;
+        if (bootFadeAlpha < 0) bootFadeAlpha = 0;
+    }
+
+    gfxFlip();
+}
+
+void loadingBeginFadeIn(const char* text)
+{
+    loadingLastMs = osGetTime();
+    loadingAccumMs = 0;
+
+    for (int a = 0; a < 255; a += LOADING_FADE_STEP) {
+        renderLoadingFrame(text, (u8)a);
+    }
+    renderLoadingFrame(text, 255);
+}
+
+void loadingTriggerFadeOut(void)
+{
+    loadingDiskFade = 255;
 }
 
 // handled in main
@@ -476,6 +578,7 @@ void handleMenuSelection() {
         regionFreeUpdate();
         if (regionFreeGamecardIn) {
             if (cartridgeIsNDS()) {
+                fadeOutToBlack();
                 audio_stop();
                 TWLFirmRebootToTitle();
             }
@@ -562,21 +665,9 @@ static bool initializeCoreServices(void)
     }
     
     hidScanInput();
-    
-    u8* framebuf_top = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, NULL, NULL);
-    u8* framebuf_bot = gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, NULL, NULL);
-    
-    if (!framebuf_top || !framebuf_bot) {
-        hidExit();
-        gfxExit();
-        aptExit();
-        srvExit();
-        return false;
-    }
-    
-    memset(framebuf_top, 0, 400 * 240 * 3);
-    memset(framebuf_bot, 0, 320 * 240 * 3);
-    
+
+    c2dBackendInit();
+
     fsInit();
     romfsInit();
     
@@ -922,8 +1013,8 @@ int main(int argc, char *argv[])
     gamecardWasIn = !regionFreeGamecardIn;
     
     int frameRate = 60;
-    int frameMs = 1000 / frameRate;
-    
+    frameMs = 1000 / frameRate;
+
     if (netloaderShortcut) {
         enterNetloader();
     } else {
@@ -983,18 +1074,40 @@ int main(int argc, char *argv[])
         PTMU_GetBatteryLevel(&batteryLevel);
         PTMU_GetBatteryChargeState(&charging);
         hidScanInput();
-        
+
         updateBackground();
+
+        if (menuStatus == menuStatusTitleBrowser || menuStatus == menuStatusHomeMenuApps || menuStatus == menuStatusTitleFiltering) {
+            dsiwareAnimateSelected(getMenuEntry(&titleMenu, titleMenu.selectedEntry));
+        } else {
+            dsiwareAnimateSelected(NULL);
+        }
 
         processMainLoop();
 
         renderFrame();
+
+        if (loadingDiskFade > 0) {
+            drawDiskFade(loadingProgressText, (u8)loadingDiskFade);
+            loadingDiskFade -= LOADING_FADE_STEP;
+            if (loadingDiskFade < 0) loadingDiskFade = 0;
+        }
+
+        if (bootFadeAlpha > 0) {
+            drawFullscreenBlack((u8)bootFadeAlpha);
+            bootFadeAlpha -= FADE_STEP;
+            if (bootFadeAlpha < 0) bootFadeAlpha = 0;
+        }
         gfxFlip();
-        
+
         endMs = osGetTime();
         delayMs = frameMs - (endMs - startMs);
         delayNs = delayMs * 1000000;
         svcSleepThread(delayNs);
+    }
+
+    if (die || dieImmediately) {
+        fadeOutToBlack();
     }
 
     if (!die && !dieImmediately) {
@@ -1032,6 +1145,7 @@ int main(int argc, char *argv[])
     if (!strcmp(me->executablePath, REGIONFREE_PATH) && regionFreeAvailable && !netloader_boot) {
         regionFreeExit();
         audio_stop();
+        csndExit();
         Result res = regionFreeRun2(me->title_id, me->mediatype);
         if (R_FAILED(res)) {
             exitServices();
@@ -1039,11 +1153,6 @@ int main(int argc, char *argv[])
         }
         while(1) svcSleepThread(1000000000ULL);
     }
-
-    gfxFlushBuffers();
-    gfxSwapBuffers();
-    gspWaitForVBlank();
-    gfxFlushBuffers();
 
     int bootResult = bootApp(me->executablePath,
                              &me->descriptor.executableMetadata,

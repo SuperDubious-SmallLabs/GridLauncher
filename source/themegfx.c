@@ -7,6 +7,7 @@
 #include <string.h>
 #include "logText.h"
 #include "MAGFX.h"
+#include "c2dbackend.h"
 
 #include "appbackgroundalphamask_bin.h"
 #include "cartbackgroundalphamask_bin.h"
@@ -74,6 +75,7 @@ void freeThemeImagesArray(themeImage images[], int numImages) {
     for (i=0; i<numImages; i++) {
         themeImage * aThemeImage = &(images[i]);
         if (aThemeImage->spriteData) {
+            c2dInvalidate(aThemeImage->spriteData);
             free(aThemeImage->spriteData);
             aThemeImage->spriteData = NULL;
         }
@@ -93,6 +95,7 @@ bool loadThemeImage(char * themePath, char * filename, char * description, int e
     aThemeImage->exists = false;
 
     if (aThemeImage->spriteData) {
+        c2dInvalidate(aThemeImage->spriteData);
         free(aThemeImage->spriteData);
     }
 

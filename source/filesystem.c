@@ -78,6 +78,57 @@ bool fileExists(char* path, FS_Archive* archive)
     return true;
 }
 
+static bool loadEmbeddedSmdh(const char* execPath, smdh_s* outSmdh)
+{
+    if(!execPath || !outSmdh)return false;
+
+    Handle fileHandle;
+    Result ret = FSUSER_OpenFile(&fileHandle, sdmcArchive, fsMakePath(PATH_ASCII, execPath), FS_OPEN_READ, 0);
+    if(ret != 0)return false;
+
+    typedef struct {
+        u32 magic;
+        u16 headerSize, relocHdrSize;
+        u32 formatVer;
+        u32 flags;
+        u32 codeSegSize, rodataSegSize, dataSegSize, bssSize;
+        u32 smdhOffset, smdhSize;
+        u32 fsOffset;
+    } _3DSX_Header_s;
+
+    _3DSX_Header_s header;
+    u32 bytesRead = 0;
+    bool ok = false;
+
+    ret = FSFILE_Read(fileHandle, &bytesRead, 0x0, &header, sizeof(header));
+    if(ret == 0 && bytesRead == sizeof(header)
+        && header.magic == 0x58534433 && header.smdhOffset > 0 && header.smdhSize >= sizeof(smdh_s)) {
+        bytesRead = 0;
+        ret = FSFILE_Read(fileHandle, &bytesRead, header.smdhOffset, outSmdh, sizeof(smdh_s));
+        if(ret == 0 && bytesRead == sizeof(smdh_s) && outSmdh->header.magic == 0x48444D53) {
+            ok = true;
+        }
+    }
+
+    FSFILE_Close(fileHandle);
+    return ok;
+}
+
+static void applyHomebrewMetadataDefaults(menuEntry_s* me)
+{
+    if(!me)return;
+
+    if(me->author[0] == '\0') {
+        strncpy(me->author, "Unknown Author", ENTRY_AUTHORLENGTH);
+        me->author[ENTRY_AUTHORLENGTH] = '\0';
+    }
+
+    if(me->description[0] == '\0' || strcmp(me->description, me->executablePath) == 0) {
+        strncpy(me->description, "Homebrew application", ENTRY_DESCLENGTH);
+        me->description[ENTRY_DESCLENGTH] = '\0';
+    }
+}
+
 void addExecutableToMenu(menu_s* m, char* execPath)
 {
     if(! m || !execPath)return;
@@ -87,38 +138,11 @@ void addExecutableToMenu(menu_s* m, char* execPath)
     int i, l=-1; for(i=0; execPath[i]; i++) if(execPath[i]=='/')l=i;
 
     initMenuEntry(&tmpEntry, execPath, &execPath[l+1], execPath, "", (u8*)installerIcon_bin);
-    Handle fileHandle;
-    Result ret = FSUSER_OpenFile(&fileHandle, sdmcArchive, fsMakePath(PATH_ASCII, execPath), FS_OPEN_READ, 0);
-    
-    if(ret == 0) {
-        typedef struct {
-            u32 magic;
-            u16 headerSize, relocHdrSize;
-            u32 formatVer;
-            u32 flags;
-            u32 codeSegSize, rodataSegSize, dataSegSize, bssSize;
-            u32 smdhOffset, smdhSize;
-            u32 fsOffset;
-        } _3DSX_Header_s;
-        
-        _3DSX_Header_s header;
-        u32 bytesRead = 0;
-        
-        ret = FSFILE_Read(fileHandle, &bytesRead, 0x0, &header, sizeof(header));
-        if(ret == 0 && bytesRead == sizeof(header)) {
-            if(header.magic == 0x58534433 && header.smdhOffset > 0 && header.smdhSize >= sizeof(smdh_s)) {
-                bytesRead = 0;
-                ret = FSFILE_Read(fileHandle, &bytesRead, header.smdhOffset, &tmpSmdh, sizeof(smdh_s));
-                if(ret == 0 && bytesRead == sizeof(smdh_s)) {
-                    if(tmpSmdh.header.magic == 0x48444D53) {
-                        initEmptyMenuEntry(&tmpEntry);
-                        initMenuEntry(&tmpEntry, execPath, &execPath[l+1], execPath, "", (u8*)installerIcon_bin);
-                        extractSmdhData(&tmpSmdh, tmpEntry.name, tmpEntry.description, tmpEntry.author, tmpEntry.iconData);
-                    }
-                }
-            }
-        }
-        FSFILE_Close(fileHandle);
+
+    if(loadEmbeddedSmdh(execPath, &tmpSmdh)) {
+        initEmptyMenuEntry(&tmpEntry);
+        initMenuEntry(&tmpEntry, execPath, &execPath[l+1], execPath, "", (u8*)installerIcon_bin);
+        extractSmdhData(&tmpSmdh, tmpEntry.name, tmpEntry.description, tmpEntry.author, tmpEntry.iconData);
     }
 
     static char xmlPath[128];
@@ -132,6 +156,8 @@ void addExecutableToMenu(menu_s* m, char* execPath)
 
         if(fileExists(xmlPath, &sdmcArchive)) loadDescriptor(&tmpEntry.descriptor, xmlPath);
     }
+
+    applyHomebrewMetadataDefaults(&tmpEntry);
 
     addMenuEntryCopy(m, &tmpEntry);
 }
@@ -199,6 +225,10 @@ void addDirectoryToMenu(menu_s* m, char* path)
 
     int ret=loadFile(iconPath, &tmpSmdh, &sdmcArchive, sizeof(smdh_s));
 
+    if(ret && loadEmbeddedSmdh(execPath, &tmpSmdh)) {
+        ret = 0;
+    }
+
     if(!ret)
     {
         initEmptyMenuEntry(&tmpEntry);
@@ -214,6 +244,8 @@ void addDirectoryToMenu(menu_s* m, char* path)
     loadDescriptor(&tmpEntry.descriptor, xmlPath);
 
     addBannerPathToMenuEntry(tmpEntry.bannerImagePath, path, &path[l+1], &tmpEntry.bannerIsFullScreen, &tmpEntry.hasBanner);
+
+    applyHomebrewMetadataDefaults(&tmpEntry);
 
     addMenuEntryCopy(m, &tmpEntry);
 }
@@ -376,7 +408,7 @@ void createMenuEntryShortcut(menu_s* m, shortcut_s* s)
         strncpy(tmpEntry.executablePath, execPath, ENTRY_PATHLENGTH);
     }
 
-    if(ret) initMenuEntry(&tmpEntry, execPath, &execPath[l+1], execPath, "Unknown publisher", (u8*)installerIcon_bin);
+    if(ret) initMenuEntry(&tmpEntry, execPath, &execPath[l+1], execPath, "", (u8*)installerIcon_bin);
 
     if(s->name) strncpy(tmpEntry.name, s->name, ENTRY_NAMELENGTH);
     if(s->description) strncpy(tmpEntry.description, s->description, ENTRY_DESCLENGTH);
@@ -400,6 +432,8 @@ void createMenuEntryShortcut(menu_s* m, shortcut_s* s)
     }
 
     tmpEntry.hasBanner = s->hasBanner;
+
+    applyHomebrewMetadataDefaults(&tmpEntry);
 
     addMenuEntryCopy(m, &tmpEntry);
 }

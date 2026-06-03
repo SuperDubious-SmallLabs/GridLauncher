@@ -19,12 +19,31 @@
 #include "bubble_bin.h"
 #endif
 
+#if FISH_EASTER_EGG
+#include "fish1_bin.h"
+#include "fish1r_bin.h"
+#include "fish2_bin.h"
+#include "fish2r_bin.h"
+#include "fish3_bin.h"
+#include "fish3r_bin.h"
+#include "shark_bin.h"
+#include "sharkr_bin.h"
+#endif
+
 #define BG_WATER_CONTROLPOINTS (100)
 #define BG_WATER_NEIGHBORHOODS (3)
 #define BG_WATER_DAMPFACTOR (0.7f)
 #define BG_WATER_SPRINGFACTOR (0.85f)
 #define BG_WATER_WIDTH (500)
 #define BG_WATER_OFFSET (-25)
+
+#define waterTopLevel 50
+#define waterLevelDiff 6
+#define waterLowerLevel waterTopLevel - waterLevelDiff
+
+#define BG_BUBBLE_HEIGHT 32
+#define BG_BUBBLE_RISE (waterTopLevel - BG_BUBBLE_HEIGHT)
+#define BG_BUBBLE_PHASE (BG_BUBBLE_RISE * 10)
 
 bool hideWaves = false;
 bool waterAnimated = true;
@@ -37,7 +56,45 @@ static bubble_t bubbles[BUBBLE_COUNT];
 static waterEffect_s waterEffect;
 static int backgroundCnt;
 
-#if KEYS_EXCITE_WATER
+#if FISH_EASTER_EGG
+#define EASTER_WATER_LOWERLEVEL 130
+#define FISH_TYPES 4
+#define FISH_POOL 8
+#define FISH_MAX_ACTIVE 6
+
+typedef struct {
+	const u8* left;
+	const u8* right;
+	int w;
+	int h;
+} fishSprite_t;
+
+static const fishSprite_t fishSprites[FISH_TYPES] = {
+	{ fish1_bin, fish1r_bin, 31, 120 },
+	{ fish2_bin, fish2r_bin, 35,  85 },
+	{ fish3_bin, fish3r_bin, 48,  95 },
+	{ shark_bin, sharkr_bin, 62, 150 },
+};
+
+typedef struct {
+	bool  active;
+	int   type;
+	int   dir;
+	float y;
+	float speed;
+	float depthFrac;
+	int   fade;
+} fish_t;
+
+static fish_t fishes[FISH_POOL];
+static int fishSpawnTimer = 0;
+bool fishEasterEggActive = false;
+
+static void updateFishes(void);
+static void drawFishes(void);
+#endif
+
+#if KEYS_EXCITE_WATER || FISH_EASTER_EGG
 static float randomFloat(void)
 {
 	return (float)rand() / (float)RAND_MAX;
@@ -51,9 +108,18 @@ void initBackground(void)
 	for(i = 0; i < BUBBLE_COUNT; i++)
 	{
 		bubbles[i].x = rand() % 400;
-		bubbles[i].y = rand() % 240;
-		bubbles[i].fade = 15;
+		bubbles[i].y = rand() % BG_BUBBLE_PHASE;
+		bubbles[i].fade = 0;
 	}
+#endif
+
+#if FISH_EASTER_EGG
+	{
+		int k;
+		for (k = 0; k < FISH_POOL; k++) fishes[k].active = false;
+	}
+	fishEasterEggActive = false;
+	fishSpawnTimer = 0;
 #endif
 
 	initWaterEffect(&waterEffect, BG_WATER_CONTROLPOINTS, BG_WATER_NEIGHBORHOODS, BG_WATER_DAMPFACTOR, BG_WATER_SPRINGFACTOR, BG_WATER_WIDTH, BG_WATER_OFFSET);
@@ -65,20 +131,20 @@ void updateBubble(bubble_t* bubble)
 {
 	bubble->y += 2;
 
-	if(bubble->fade < 10)
+	if(bubble->y >= BG_BUBBLE_PHASE)
 	{
 		bubble->x = rand() % 400;
-		bubble->y = rand() % 10;
-		bubble->fade = 15;
+		bubble->y = 0;
+		bubble->fade = 0;
+		return;
 	}
-	else if(bubble->y >= 240 && bubble->y % 240 > 100)
-	{
-		bubble->fade -= 10;
-	}
-	else if(bubble->fade < 255)
-	{
-		bubble->fade += 10;
-	}
+
+	int up = bubble->y;
+	int down = BG_BUBBLE_PHASE - bubble->y;
+	int f = (up < down) ? up : down;
+	f = f * 510 / BG_BUBBLE_PHASE;
+	if(f > 255) f = 255;
+	bubble->fade = (u8)f;
 }
 
 void drawBubbles(void)
@@ -86,9 +152,9 @@ void drawBubbles(void)
 	int i;
 	for(i = 0; i < BUBBLE_COUNT; i++)
 	{
-		if (bubbles[i].y < 240) continue;
+		if(bubbles[i].fade == 0) continue;
 		gfxDrawSpriteAlphaBlendFade(GFX_TOP, GFX_LEFT, (u8*)bubble_bin, 32, 32,
-			-64 + bubbles[i].y % 240,
+			bubbles[i].y / 10,
 			bubbles[i].x, bubbles[i].fade);
 	}
 }
@@ -96,6 +162,12 @@ void drawBubbles(void)
 
 void updateBackground(void)
 {
+#if FISH_EASTER_EGG
+	if ((hidKeysHeld() & KEY_L) && (hidKeysHeld() & KEY_R) && (hidKeysDown() & KEY_SELECT)) {
+		fishEasterEggActive = !fishEasterEggActive;
+	}
+#endif
+
     if (!waterAnimated) {
         return;
     }
@@ -128,11 +200,11 @@ void updateBackground(void)
 	updateWaterEffect(&waterEffect);
 
 	backgroundCnt++;
-}
 
-#define waterTopLevel 50
-#define waterLevelDiff 5
-#define waterLowerLevel waterTopLevel - waterLevelDiff
+#if FISH_EASTER_EGG
+	updateFishes();
+#endif
+}
 
 int topLevel = waterTopLevel;
 int lowerLevel = waterLowerLevel;
@@ -142,6 +214,86 @@ int staticWaterX = 0;
 u8 tintedWater[70*400*4];
 u8 tintedWaterBorder[70*400*4];
 bool staticWaterDrawn = false;
+
+#if FISH_EASTER_EGG
+static void spawnFish(void)
+{
+	int idx = -1, activeCount = 0, i;
+	for (i = 0; i < FISH_POOL; i++) {
+		if (fishes[i].active) activeCount++;
+		else if (idx < 0) idx = i;
+	}
+	if (idx < 0 || activeCount >= FISH_MAX_ACTIVE) return;
+
+	fish_t* f = &fishes[idx];
+	const fishSprite_t* s;
+	f->active = true;
+	f->type = rand() % FISH_TYPES;
+	f->dir = (rand() % 2) ? 1 : -1;
+	f->speed = 0.6f + randomFloat() * 1.4f;
+	f->depthFrac = randomFloat();
+	f->fade = 0;
+	s = &fishSprites[f->type];
+	f->y = (f->dir > 0) ? -(float)s->h : 400.0f;
+}
+
+static void updateFishes(void)
+{
+	int i;
+
+	if (fishEasterEggActive) {
+		if (fishSpawnTimer > 0) {
+			fishSpawnTimer--;
+		}
+		else {
+			spawnFish();
+			fishSpawnTimer = 40 + rand() % 80;
+		}
+	}
+
+	for (i = 0; i < FISH_POOL; i++) {
+		fish_t* f = &fishes[i];
+		const fishSprite_t* s;
+		if (!f->active) continue;
+		s = &fishSprites[f->type];
+
+		f->y += f->dir * f->speed;
+
+		if (fishEasterEggActive) {
+			f->fade += 8;
+			if (f->fade > 255) f->fade = 255;
+		}
+		else {
+			f->fade -= 8;
+			if (f->fade <= 0) { f->active = false; continue; }
+		}
+
+		if (f->dir > 0 && f->y > 400.0f) f->active = false;
+		else if (f->dir < 0 && f->y < -(float)s->h) f->active = false;
+	}
+}
+
+static void drawFishes(void)
+{
+	int i;
+	for (i = 0; i < FISH_POOL; i++) {
+		fish_t* f = &fishes[i];
+		const fishSprite_t* s;
+		const u8* data;
+		int span, x;
+		if (!f->active || f->fade <= 0) continue;
+		s = &fishSprites[f->type];
+		data = (f->dir > 0) ? s->right : s->left;
+
+		span = topLevel - s->w - 4;
+		if (span < 0) span = 0;
+		x = 2 + (int)(f->depthFrac * span);
+
+		gfxDrawSpriteAlphaBlendFade(GFX_TOP, GFX_LEFT, (u8*)data, s->w, s->h,
+			x, (int)f->y, (u8)f->fade);
+	}
+}
+#endif
 
 void drawBackground()
 {
@@ -174,28 +326,41 @@ void drawBackground()
             return;
         }
 
+        int targetLower;
         if (hideWaves) {
-            if (lowerLevel > 0) {
-                topLevel -= 1;
-                lowerLevel -= 1;
-            }
+            targetLower = 0;
         }
+#if FISH_EASTER_EGG
+        else if (fishEasterEggActive) {
+            targetLower = EASTER_WATER_LOWERLEVEL;
+        }
+#endif
         else {
-            if (lowerLevel < waterLowerLevel) {
-                topLevel += 1;
-                lowerLevel += 1;
-            }
+            targetLower = waterLowerLevel;
+        }
+
+        if (lowerLevel < targetLower) {
+            topLevel += 1;
+            lowerLevel += 1;
+        }
+        else if (lowerLevel > targetLower) {
+            topLevel -= 1;
+            lowerLevel -= 1;
         }
 
 
         u8 * waterBorderColor = (u8[]){waterTop->r, waterTop->g, waterTop->b};
         u8 * waterColor = (u8[]){waterBottom->r, waterBottom->g, waterBottom->b};
 
-        gfxDrawWave(GFX_TOP, GFX_LEFT, waterBorderColor, waterColor, topLevel, 20, 5, (gfxWaveCallback)&evaluateWater, &waterEffect);
+        gfxDrawWave(GFX_TOP, GFX_LEFT, waterBorderColor, waterColor, topLevel, 20, waterLevelDiff, (gfxWaveCallback)&evaluateWater, &waterEffect);
         gfxDrawWave(GFX_TOP, GFX_LEFT, waterColor, waterBorderColor, lowerLevel, 20, 0, (gfxWaveCallback)&evaluateWater, &waterEffect);
 
 #if BUBBLES_ENABLED
         drawBubbles();
+#endif
+
+#if FISH_EASTER_EGG
+        drawFishes();
 #endif
     }
 }

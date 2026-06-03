@@ -158,6 +158,10 @@ void createMenuEntry(menu_s* m, char* execPath, char* name, char* description, c
 menuEntry_s* getMenuEntry(menu_s* m, u16 n);
 void drawBottomStatusBar(char* title);
 
+void renderLoadingFrame(const char* text, u8 diskFade);
+void loadingBeginFadeIn(const char* text);
+void loadingTriggerFadeOut(void);
+
 //menu entry stuff
 void initEmptyMenuEntry(menuEntry_s* me);
 void initMenuEntry(menuEntry_s* me, char* execPath, char* name, char* description, char* author, u8* iconData);

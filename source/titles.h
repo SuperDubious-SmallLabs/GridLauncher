@@ -82,4 +82,6 @@ void cancelTitleLoading();
 
 void createTitleInfoFromTitleID(u64 title_id, u8 mediaType, titleInfo_s *info);
 
+bool isDSiWareTitle(u64 tid);
+
 #endif

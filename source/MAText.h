@@ -20,4 +20,6 @@ int MADrawTextWrap(gfxScreen_t screen, gfx3dSide_t side, int cursorx, int cursor
 
 int MATextWidthInPixels(char * text, MAFont * font);
 
+void MASetTextAlpha(u8 alpha);
+
 #endif

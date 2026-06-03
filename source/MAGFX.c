@@ -1,6 +1,7 @@
 #include "MAGFX.h"
 #include "string.h"
 #include "gfx.h"
+#include "MAText.h"
 #include "colours.h"
 #include "diskalphamask_bin.h"
 #include "MAFontRobotoRegular.h"
@@ -130,8 +131,9 @@ void MAGFXDrawPanel(gfxScreen_t screen, bool forceZeroLeftOffset) {
 u8 disk[64*64*4];
 bool diskDrawn = false;
 
-void drawDisk(char * text) {
-    gfxFillRectAlphaBlend(GFX_BOTTOM, GFX_LEFT, 128, 128, 128, 200, 0, 0, 240, 320);
+void drawDiskFade(char * text, u8 fade) {
+    int rectAlpha = 200 * fade / 255;
+    gfxFillRectAlphaBlend(GFX_BOTTOM, GFX_LEFT, 128, 128, 128, rectAlpha, 0, 0, 240, 320);
 
     int diskX = (240-64)/2;
 
@@ -141,11 +143,19 @@ void drawDisk(char * text) {
         MAGFXImageWithRGBAndAlphaMask(tint->r, tint->g, tint->b, (u8*)diskalphamask_bin, disk, 64, 64);
     }
 
-    gfxDrawSpriteAlphaBlend(GFX_BOTTOM, GFX_LEFT, disk, 64, 64, diskX, (320-64)/2);
+    gfxDrawSpriteAlphaBlendFade(GFX_BOTTOM, GFX_LEFT, disk, 64, 64, diskX, (320-64)/2, fade);
 
-    int len = MATextWidthInPixels(text, &MAFontRobotoRegular16);
-    rgbColour * dark = darkTextColour();
-    MADrawText(GFX_BOTTOM, GFX_LEFT, diskX - 32, (320/2)-(len/2), text, &MAFontRobotoRegular16, dark->r, dark->g, dark->b);
+    if (text && text[0]) {
+        int len = MATextWidthInPixels(text, &MAFontRobotoRegular16);
+        rgbColour * dark = darkTextColour();
+        MASetTextAlpha(fade);
+        MADrawText(GFX_BOTTOM, GFX_LEFT, diskX - 32, (320/2)-(len/2), text, &MAFontRobotoRegular16, dark->r, dark->g, dark->b);
+        MASetTextAlpha(255);
+    }
+}
+
+void drawDisk(char * text) {
+    drawDiskFade(text, 255);
 }
 
 

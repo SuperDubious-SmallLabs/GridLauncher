@@ -19,6 +19,9 @@ Result loadGamecardIcon(smdh_s* out);
 Result TWLFirmRebootToTitle();
 void regionFreeUpdate();
 
+bool buildDSiWareMenuEntry(u64 title_id, u8 mediatype, menuEntry_s* out);
+void dsiwareAnimateSelected(menuEntry_s* selected);
+
 u64 cartridgeGetCurrentTitleId(void);
 u8 cartridgeGetCurrentMediaType(void);
 FS_CardType cartridgeGetCurrentCardType(void);

@@ -101,6 +101,12 @@ bool application_filter(u64 tid)
             tid_high == 0x00048005);   // DSiWare on SD (though should use 0x00048004)
 }
 
+bool isDSiWareTitle(u64 tid)
+{
+    u32 tid_high = tid >> 32;
+    return (tid_high == 0x00048004 || tid_high == 0x00048005);
+}
+
 void initTitleList(titleList_s* tl, titleFilter_callback filter, u8 mediatype)
 {
 	if(!tl)return;
@@ -433,12 +439,16 @@ void populateTitleMenu(menu_s* aTitleMenu, titleBrowser_s *tb, bool filter, bool
                 continue;
             }
 
-            if (!aTitle.icon) {
-                loadTitleInfoIcon(&aTitle);
-            }
+            bool isDsi = isDSiWareTitle(aTitle.title_id);
 
-            if (!aTitle.icon) {
-                continue;
+            if (!isDsi) {
+                if (!aTitle.icon) {
+                    loadTitleInfoIcon(&aTitle);
+                }
+
+                if (!aTitle.icon) {
+                    continue;
+                }
             }
 
             static menuEntry_s me;
@@ -473,6 +483,10 @@ void populateTitleMenu(menu_s* aTitleMenu, titleBrowser_s *tb, bool filter, bool
                     memcpy(me.iconData, ndsEntry->iconData, ENTRY_ICONSIZE);
                 } else {
                     extractSmdhData(aTitle.icon, me.name, me.description, me.author, me.iconData);
+                }
+            } else if (isDsi) {
+                if (!buildDSiWareMenuEntry(aTitle.title_id, aTitle.mediatype, &me)) {
+                    continue;
                 }
             } else {
                 extractSmdhData(aTitle.icon, me.name, me.description, me.author, me.iconData);
@@ -625,9 +639,9 @@ void updateTitleMenu(titleBrowser_s * aTitleBrowser, menu_s * aTitleMenu, char *
         gotoFirstIcon(aTitleMenu);
     }
 
-    drawDisk("Loading titles");
-    gfxFlip();
+    loadingBeginFadeIn("");
     titleLoadFunction();
+    loadingTriggerFadeOut();
 }
 
 void toggleTitleFilter(menuEntry_s *me, menu_s * m) {

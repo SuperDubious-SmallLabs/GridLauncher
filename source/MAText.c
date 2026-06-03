@@ -1,6 +1,7 @@
 #include "MAText.h"
 
 #include "gfx.h"
+#include "c2dbackend.h"
 #include <stdio.h>      // For sprintf. Remove this when no longer needed
 #include <stdlib.h>
 #include <string.h>
@@ -43,35 +44,24 @@ int getCharIndexOrErrorCharIndex(MAFont * font, uint8_t asciiID) {
     return charIndex;
 }
 
+static u8 maTextAlpha = 255;
+
+void MASetTextAlpha(u8 alpha) {
+    maTextAlpha = alpha;
+}
+
 int MADrawCharacter(gfxScreen_t screen, gfx3dSide_t side, MAFont *font, int charDescIndex, int cursorx, int cursory, int red, int green, int blue) {
+    (void)side;
     MACharDesc aCharDesc = font->charDescs[charDescIndex];
 
-    //Get the image using the x/y/w/h from the image data
-    //Memcpy this to a new image
+    int uLeft = font->pngW - aCharDesc.y - aCharDesc.h;
+    int vTop  = aCharDesc.x;
+    int gW    = aCharDesc.h;
+    int gH    = aCharDesc.w;
 
-    int dataOffsetTop = (aCharDesc.x * font->pngW);
-    int dataOffsetLeft = ( font->pngW - aCharDesc.y - aCharDesc.h );
-    int initialSourceByte = dataOffsetTop + dataOffsetLeft;
-    int imageDataSize = (aCharDesc.w * aCharDesc.h)*4;
-
-    u8 destImageData[imageDataSize];
-    int destByte = 0;
-    int row, col;
-    for (row=0; row<aCharDesc.w; row++) {
-        for (col=0; col<aCharDesc.h; col++) {
-            int rowOffset = (row * font->pngW);
-            int colOffset = col;
-            int sourceByte = initialSourceByte + rowOffset + colOffset;
-
-            memcpy(&destImageData[destByte], &blue, 1);                     destByte++;
-            memcpy(&destImageData[destByte], &green, 1);                    destByte++;
-            memcpy(&destImageData[destByte], &red, 1);                      destByte++;
-            memcpy(&destImageData[destByte], &font->data[sourceByte], 1);   destByte++;
-        }
-    }
-
-    //Draw the character
-    gfxDrawSpriteAlphaBlend(screen, side, destImageData, aCharDesc.h, aCharDesc.w, cursorx, cursory);
+    c2dDrawGlyph(screen, font->data, font->pngW, charDescIndex,
+                 uLeft, vTop, gW, gH, cursorx, cursory,
+                 (u8)red, (u8)green, (u8)blue, maTextAlpha);
 
     //Return the width of the character (for moving the cursor along to draw the next character)
     return aCharDesc.w;

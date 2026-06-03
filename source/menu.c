@@ -6,6 +6,7 @@
 
 #include "filesystem.h"
 #include "menu.h"
+#include "c2dbackend.h"
 #include "smdh.h"
 #include "cartridge.h"
 #include "regionfree_bin.h"
@@ -537,7 +538,7 @@ void drawBottomStatusBar(char* title) {
     rgbColour * light = lightTextColour();
 
     int stringLength = MATextWidthInPixels(title, &MAFontRobotoRegular10);
-    MADrawText(GFX_BOTTOM, GFX_LEFT, 240-height-2, (320/2)-(stringLength/2), title, &MAFontRobotoRegular10, light->r, light->g, light->b);
+    MADrawText(GFX_BOTTOM, GFX_LEFT, 240-height-3, (320/2)-(stringLength/2), title, &MAFontRobotoRegular10, light->r, light->g, light->b);
 
     button * leftToolbarButton = btnButtonInListWithTag(&toolbarButtons, buttonTagTopLeft);
     button * rightToolbarButton = btnButtonInListWithTag(&toolbarButtons, buttonTagTopRight);
@@ -918,6 +919,8 @@ void addMenuEntryCopy(menu_s* m, menuEntry_s* me)
 void freeMenuEntry(menuEntry_s* me)
 {
 	if(!me)return;
+
+	c2dInvalidate(me->iconData);
 
 	freeDescriptor(&me->descriptor);
 }
@@ -1832,11 +1835,11 @@ bool updateMenu(menu_s* m) {
     else if (menuStatus == menuStatusFolderChanged) {
 //        logText("Reloading main menu");
 
-        drawDisk("Loading folder");
-        gfxFlip();
+        loadingBeginFadeIn("Loading folder");
         reloadMenu(m);
         gotoFirstIcon(m);
         setMenuStatus(menuStatusIcons);
+        loadingTriggerFadeOut();
 
 //        logText("Done reloading");
 
@@ -1903,6 +1906,21 @@ void loadBannerImage(menuEntry_s * me) {
                 memcpy(&bannerImage, out, sizeof(bannerImage));
             }
         }
+    }
+}
+
+static void drawEntryIconCached(gfxScreen_t screen, const u8* iconSrc, int x, int y) {
+    if (!iconSrc) return;
+    if (c2dSpriteCached(iconSrc, ENTRY_ICON_WIDTH, ENTRY_ICON_HEIGHT, true)) {
+        c2dDrawSpriteKeyed(screen, iconSrc, NULL,
+                           ENTRY_ICON_WIDTH, ENTRY_ICON_HEIGHT, x, y, true, 255);
+    }
+    else {
+        u8 transparentIcon[ENTRY_ICON_WIDTH * ENTRY_ICON_HEIGHT * 4];
+        MAGFXApplyAlphaMask((u8*)iconSrc, (u8*)appiconalphamask_bin, transparentIcon,
+                            ENTRY_ICON_WIDTH, ENTRY_ICON_HEIGHT, false);
+        c2dDrawSpriteKeyed(screen, iconSrc, transparentIcon,
+                           ENTRY_ICON_WIDTH, ENTRY_ICON_HEIGHT, x, y, true, 255);
     }
 }
 
@@ -1978,19 +1996,10 @@ int drawMenuEntry(menuEntry_s* me, gfxScreen_t screen, bool selected, menu_s *m,
         //Highlight the icon if it is selected
 
 
-        //This is where the masked image will be put (rounding the corners)
-        u8 transparentIcon[48*48*4];
-
-        //Mask whichever icon is going to be drawn (either the game card icon or a homebrew app's icon
-        if (me->isRegionFreeEntry && regionFreeGamecardIn) {
-            MAGFXApplyAlphaMask(gamecardMenuEntry.iconData, (u8*)appiconalphamask_bin, transparentIcon, 48, 48, false);
-        }
-        else {
-            MAGFXApplyAlphaMask(me->iconData, (u8*)appiconalphamask_bin, transparentIcon, 48, 48, false);
-        }
-
         //Draw the icon on the bottom screen
-        gfxDrawSpriteAlphaBlend(screen, GFX_LEFT, transparentIcon, ENTRY_ICON_WIDTH, ENTRY_ICON_HEIGHT, x+7, y+8);
+        const u8 * iconSrc = (me->isRegionFreeEntry && regionFreeGamecardIn)
+                               ? gamecardMenuEntry.iconData : me->iconData;
+        drawEntryIconCached(screen, iconSrc, x+7, y+8);
 
         if (me->drawFirstLetterOfName) {
             char firstLetter[2];
@@ -2082,18 +2091,11 @@ int drawMenuEntry(menuEntry_s* me, gfxScreen_t screen, bool selected, menu_s *m,
             displayIconY += (156-ENTRY_ICON_HEIGHT)/2;
 
             /*
-             Draw the app icon
+             Draw the app icon (GPU-cached; see drawEntryIconCached)
              */
-            u8 transparentIcon[48*48*4];
-
-            if (me->isRegionFreeEntry && regionFreeGamecardIn) {
-                MAGFXApplyAlphaMask(gamecardMenuEntry.iconData, (u8*)appiconalphamask_bin, transparentIcon, 48, 48, false);
-            }
-            else {
-                MAGFXApplyAlphaMask(me->iconData, (u8*)appiconalphamask_bin, transparentIcon, 48, 48, false);
-            }
-
-            gfxDrawSpriteAlphaBlend(GFX_TOP, GFX_LEFT, transparentIcon, ENTRY_ICON_WIDTH, ENTRY_ICON_HEIGHT, displayIconX, displayIconY);
+            const u8 * iconSrc = (me->isRegionFreeEntry && regionFreeGamecardIn)
+                                   ? gamecardMenuEntry.iconData : me->iconData;
+            drawEntryIconCached(GFX_TOP, iconSrc, displayIconX, displayIconY);
         }
 
         xPos += (ENTRY_ICON_WIDTH*2)+30;
